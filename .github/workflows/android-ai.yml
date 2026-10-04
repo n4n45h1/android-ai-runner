@@ -52,7 +52,6 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
           hostname: android-runner
-          args: --accept-routes
           timeout: 3m
 
       - name: Configure SSH server (Tailscale-only)
