@@ -1,0 +1,165 @@
+name: android-ai
+
+# Manual trigger only. Never runs on push / pull_request, so forks and PRs
+# can never reach the TAILSCALE_AUTHKEY secret.
+on:
+  workflow_dispatch:
+    inputs:
+      session_minutes:
+        description: "Minutes to keep the emulator session alive (1-330)."
+        required: false
+        default: "300"
+        type: string
+
+permissions:
+  contents: read
+
+# Only one Android session at a time. A queued run waits for the current one.
+concurrency:
+  group: android-ai-session
+  cancel-in-progress: false
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Validate session_minutes
+        env:
+          MIN: ${{ github.event.inputs.session_minutes }}
+        run: |
+          set -euo pipefail
+          case "${MIN}" in
+            ''|*[!0-9]*)
+              echo "session_minutes must be an integer"; exit 1 ;;
+          esac
+          if [ "${MIN}" -lt 1 ] || [ "${MIN}" -gt 330 ]; then
+            echo "session_minutes must be between 1 and 330"; exit 1
+          fi
+          echo "session_minutes=${MIN} accepted"
+
+      - name: Report runner spec
+        run: |
+          set -euo pipefail
+          echo "== nproc =="; nproc
+          echo "== memory =="; free -h
+          echo "== disk =="; df -h /
+          echo "== kernel =="; uname -a
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: android-runner
+          args: --accept-routes
+          timeout: 3m
+
+      - name: Configure SSH server (Tailscale-only)
+        env:
+          OPENCODE_PUBKEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIolNLxT/1R+Q7CxGKB73EqX6qL6Vtzre4KipQveR8b9 abc@eabdf029c210"
+        run: |
+          set -euo pipefail
+
+          TS_IP="$(tailscale ip -4 | head -n1)"
+          if [ -z "${TS_IP}" ]; then echo "no tailscale ip"; exit 1; fi
+          echo "tailscale ip: ${TS_IP}"
+
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server
+
+          # Lock down authorized_keys: OpenCode public key only.
+          install -d -m 700 -o runner -g runner /home/runner/.ssh
+          printf '%s\n' "${OPENCODE_PUBKEY}" > /tmp/opencode_authorized_keys
+          sudo install -m 600 -o runner -g runner /tmp/opencode_authorized_keys /home/runner/.ssh/authorized_keys
+          rm -f /tmp/opencode_authorized_keys
+
+          # Bind sshd to the Tailscale interface only; no 0.0.0.0 exposure.
+          sudo mkdir -p /run/sshd
+          sudo systemctl stop ssh.socket ssh.service 2>/dev/null || true
+          sudo systemctl disable ssh.socket 2>/dev/null || true
+          sudo tee /etc/ssh/sshd_config.d/99-tailscale.conf >/dev/null <<EOF
+          ListenAddress ${TS_IP}
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin no
+          PubkeyAuthentication yes
+          AllowUsers runner
+          EOF
+
+          sudo sshd -t
+          sudo systemctl enable --now ssh.service 2>/dev/null || sudo /usr/sbin/sshd
+
+          # Confirm the listener is only on the tailnet address.
+          ss -ltnp | grep -E ':22\b' || true
+
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Android emulator session
+        uses: ReactiveCircus/android-emulator-runner@v2
+        env:
+          SESSION_MINUTES: ${{ github.event.inputs.session_minutes }}
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          cores: 2
+          ram-size: 4096M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          force-avd-creation: true
+          emulator-boot-timeout: 600
+          script: |
+            set -euo pipefail
+
+            echo "== emulator env =="
+            nproc
+            free -h
+            df -h /
+
+            adb wait-for-device
+            adb devices
+
+            # Wait until Android has fully booted.
+            booted=0
+            for _ in $(seq 1 180); do
+              b="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+              if [ "${b}" = "1" ]; then booted=1; break; fi
+              sleep 5
+            done
+            if [ "${booted}" != "1" ]; then echo "boot_completed never reached"; exit 1; fi
+
+            adb devices
+            echo "release=$(adb shell getprop ro.build.version.release)"
+            echo "model=$(adb shell getprop ro.product.model)"
+            echo "sdk=$(adb shell getprop ro.build.version.sdk)"
+            echo "boot_completed=$(adb shell getprop sys.boot_completed)"
+
+            # Keep the emulator (and this session) alive until timeout or stop flag.
+            MIN="${SESSION_MINUTES:-300}"
+            case "${MIN}" in *[!0-9]*|'') MIN=300;; esac
+            if [ "${MIN}" -gt 330 ]; then MIN=330; fi
+            echo "session limit: ${MIN} minutes"
+
+            start="$(date +%s)"
+            limit=$(( MIN * 60 ))
+            while :; do
+              if [ -f /tmp/stop-android-session ]; then
+                echo "stop flag detected, ending session"; break
+              fi
+              now="$(date +%s)"
+              if [ $(( now - start )) -ge "${limit}" ]; then
+                echo "session time limit reached, ending"; break
+              fi
+              sleep 15
+            done
+
+            echo "session finished"

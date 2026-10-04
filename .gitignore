@@ -1,0 +1,22 @@
+# Never commit application artifacts, captured data, or secrets to this public repo.
+*.apk
+*.aab
+*.ipa
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+*.log
+*.png
+*.jpg
+*.jpeg
+*.xml
+*.har
+*.frida
+*.dex
+jadx-out/
+android-artifacts/
+/tmp/
+.env
+.env.*
