@@ -67,6 +67,10 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server
 
+          # Stop any socket/service that would bind 0.0.0.0:22.
+          sudo systemctl stop ssh.socket ssh.service 2>/dev/null || true
+          sudo systemctl disable ssh.socket 2>/dev/null || true
+
           # Lock down authorized_keys: OpenCode public key only.
           install -d -m 700 -o runner -g runner /home/runner/.ssh
           printf '%s\n' "${OPENCODE_PUBKEY}" > /tmp/opencode_authorized_keys
@@ -74,9 +78,6 @@ jobs:
           rm -f /tmp/opencode_authorized_keys
 
           # Bind sshd to the Tailscale interface only; no 0.0.0.0 exposure.
-          sudo mkdir -p /run/sshd
-          sudo systemctl stop ssh.socket ssh.service 2>/dev/null || true
-          sudo systemctl disable ssh.socket 2>/dev/null || true
           sudo tee /etc/ssh/sshd_config.d/99-tailscale.conf >/dev/null <<EOF
           ListenAddress ${TS_IP}
           PasswordAuthentication no
@@ -86,8 +87,13 @@ jobs:
           AllowUsers runner
           EOF
 
+          # sshd needs the privsep dir; recreate it after stopping services.
+          sudo mkdir -p /run/sshd
+          sudo chmod 0755 /run/sshd
+
           sudo sshd -t
           sudo systemctl enable --now ssh.service 2>/dev/null || sudo /usr/sbin/sshd
+          sudo mkdir -p /run/sshd
 
           # Confirm the listener is only on the tailnet address.
           ss -ltnp | grep -E ':22\b' || true
