@@ -78,7 +78,10 @@ jobs:
           rm -f /tmp/opencode_authorized_keys
 
           # Bind sshd to the Tailscale interface only; no 0.0.0.0 exposure.
-          sudo tee /etc/ssh/sshd_config.d/99-tailscale.conf >/dev/null <<EOF
+          # sshd uses the FIRST value it reads, so this drop-in must sort first
+          # (00-) to override 50-cloud-init.conf's `PasswordAuthentication yes`.
+          sudo rm -f /etc/ssh/sshd_config.d/99-tailscale.conf
+          sudo tee /etc/ssh/sshd_config.d/00-tailscale.conf >/dev/null <<EOF
           ListenAddress ${TS_IP}
           PasswordAuthentication no
           KbdInteractiveAuthentication no
@@ -92,6 +95,11 @@ jobs:
           sudo chmod 0755 /run/sshd
 
           sudo sshd -t
+          # Hard security assertions before we ever start the daemon.
+          sudo sshd -T | grep -qi '^passwordauthentication no' || { echo "password auth not disabled"; exit 1; }
+          sudo sshd -T | grep -qi '^permitrootlogin no' || { echo "root login not disabled"; exit 1; }
+          sudo sshd -T | grep -qi "^listenaddress ${TS_IP}:22" || { echo "not bound to tailscale ip"; exit 1; }
+
           sudo systemctl enable --now ssh.service 2>/dev/null || sudo /usr/sbin/sshd
           sudo mkdir -p /run/sshd
 
