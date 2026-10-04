@@ -107,6 +107,59 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
 
+      # android-emulator-runner executes `script` line-by-line with /bin/sh,
+      # so the real session logic lives in a file invoked as a single line.
+      - name: Write Android session script
+        run: |
+          cat > /tmp/android-session.sh <<'EOSCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          echo "== emulator env =="
+          nproc
+          free -h
+          df -h /
+
+          adb wait-for-device
+          adb devices
+
+          booted=0
+          for _ in $(seq 1 180); do
+            b="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+            if [ "${b}" = "1" ]; then booted=1; break; fi
+            sleep 5
+          done
+          if [ "${booted}" != "1" ]; then echo "boot_completed never reached"; exit 1; fi
+
+          adb devices
+          echo "release=$(adb shell getprop ro.build.version.release)"
+          echo "model=$(adb shell getprop ro.product.model)"
+          echo "sdk=$(adb shell getprop ro.build.version.sdk)"
+          echo "boot_completed=$(adb shell getprop sys.boot_completed)"
+
+          MIN="${SESSION_MINUTES:-300}"
+          case "${MIN}" in *[!0-9]*|'') MIN=300;; esac
+          if [ "${MIN}" -gt 330 ]; then MIN=330; fi
+          echo "session limit: ${MIN} minutes"
+
+          start="$(date +%s)"
+          limit=$(( MIN * 60 ))
+          while :; do
+            if [ -f /tmp/stop-android-session ]; then
+              echo "stop flag detected, ending session"; break
+            fi
+            now="$(date +%s)"
+            if [ $(( now - start )) -ge "${limit}" ]; then
+              echo "session time limit reached, ending"; break
+            fi
+            sleep 15
+          done
+
+          echo "session finished"
+          EOSCRIPT
+          chmod +x /tmp/android-session.sh
+          bash -n /tmp/android-session.sh && echo "session script syntax OK"
+
       - name: Android emulator session
         uses: ReactiveCircus/android-emulator-runner@v2
         env:
@@ -122,51 +175,4 @@ jobs:
           disable-animations: true
           force-avd-creation: true
           emulator-boot-timeout: 600
-          script: |
-            # ReactiveCircus/android-emulator-runner runs this with /bin/sh (dash),
-            # so keep it POSIX: no pipefail, no [[ ]], no arrays.
-            set -eu
-
-            echo "== emulator env =="
-            nproc
-            free -h
-            df -h /
-
-            adb wait-for-device
-            adb devices
-
-            # Wait until Android has fully booted.
-            booted=0
-            for _ in $(seq 1 180); do
-              b="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
-              if [ "${b}" = "1" ]; then booted=1; break; fi
-              sleep 5
-            done
-            if [ "${booted}" != "1" ]; then echo "boot_completed never reached"; exit 1; fi
-
-            adb devices
-            echo "release=$(adb shell getprop ro.build.version.release)"
-            echo "model=$(adb shell getprop ro.product.model)"
-            echo "sdk=$(adb shell getprop ro.build.version.sdk)"
-            echo "boot_completed=$(adb shell getprop sys.boot_completed)"
-
-            # Keep the emulator (and this session) alive until timeout or stop flag.
-            MIN="${SESSION_MINUTES:-300}"
-            case "${MIN}" in *[!0-9]*|'') MIN=300;; esac
-            if [ "${MIN}" -gt 330 ]; then MIN=330; fi
-            echo "session limit: ${MIN} minutes"
-
-            start="$(date +%s)"
-            limit=$(( MIN * 60 ))
-            while :; do
-              if [ -f /tmp/stop-android-session ]; then
-                echo "stop flag detected, ending session"; break
-              fi
-              now="$(date +%s)"
-              if [ $(( now - start )) -ge "${limit}" ]; then
-                echo "session time limit reached, ending"; break
-              fi
-              sleep 15
-            done
-
-            echo "session finished"
+          script: bash /tmp/android-session.sh
