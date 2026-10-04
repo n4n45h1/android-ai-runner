@@ -98,6 +98,9 @@ jobs:
           # Confirm the listener is only on the tailnet address.
           ss -ltnp | grep -E ':22\b' || true
 
+          # Non-interactive SSH does not source the SDK PATH; expose adb.
+          sudo ln -sf /usr/local/lib/android/sdk/platform-tools/adb /usr/local/bin/adb
+
       - name: Enable KVM
         run: |
           set -euo pipefail
