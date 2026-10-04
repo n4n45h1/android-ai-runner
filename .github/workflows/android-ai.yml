@@ -123,7 +123,9 @@ jobs:
           force-avd-creation: true
           emulator-boot-timeout: 600
           script: |
-            set -euo pipefail
+            # ReactiveCircus/android-emulator-runner runs this with /bin/sh (dash),
+            # so keep it POSIX: no pipefail, no [[ ]], no arrays.
+            set -eu
 
             echo "== emulator env =="
             nproc
