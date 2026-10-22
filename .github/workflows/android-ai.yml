@@ -21,9 +21,9 @@ concurrency:
 
 jobs:
   android:
-    # The Almond APK is ARM64-only. Keep the host architecture ARM64 too;
-    # running an arm64-v8a AVD on ubuntu-latest (x86_64) booted unreliably.
-    runs-on: ubuntu-24.04-arm
+    # The Android SDK publishes the Linux emulator binary for x86_64. The
+    # ARM64 system image below is therefore run through software emulation.
+    runs-on: ubuntu-latest
     timeout-minutes: 355
 
     steps:
