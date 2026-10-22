@@ -16,7 +16,7 @@ permissions:
 
 # Only one Android session at a time. A queued run waits for the current one.
 concurrency:
-  group: android-ai-session-playstore
+  group: android-ai-session-arm64
   cancel-in-progress: false
 
 jobs:
