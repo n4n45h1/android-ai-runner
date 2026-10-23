@@ -222,7 +222,7 @@ jobs:
           disable-animations: true
           force-avd-creation: true
           emulator-boot-timeout: 600
-           script: bash /tmp/android-session.sh
+          script: bash /tmp/android-session.sh
 
       - name: Collect Almond diagnostics
         if: always()
