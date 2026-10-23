@@ -214,7 +214,7 @@ jobs:
           SESSION_MINUTES: ${{ github.event.inputs.session_minutes }}
         with:
           api-level: 35
-           target: google_apis
+          target: google_apis
           arch: x86_64
           profile: pixel_7_pro
           cores: 2
