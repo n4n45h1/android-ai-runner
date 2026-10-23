@@ -21,8 +21,8 @@ concurrency:
 
 jobs:
   android:
-    # The Android SDK publishes the Linux emulator binary for x86_64. The
-    # ARM64 system image below is therefore run through software emulation.
+    # GitHub's public-repository runner is free and provides KVM. Use the
+    # Play Store x86_64 image; its native bridge can run the ARM64 APK.
     runs-on: ubuntu-latest
     timeout-minutes: 355
 
@@ -184,11 +184,12 @@ jobs:
         with:
           api-level: 35
           target: google_apis_playstore
-          arch: arm64-v8a
+          arch: x86_64
           profile: pixel_7_pro
           cores: 2
           ram-size: 4096M
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -accel off
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-linux-hw-accel: false
           disable-animations: true
           force-avd-creation: true
           emulator-boot-timeout: 600
