@@ -170,7 +170,9 @@ jobs:
            echo "sdk=$(adb shell getprop ro.build.version.sdk)"
            echo "boot_completed=$(adb shell getprop sys.boot_completed)"
 
-           adb install-multiple -r \
+           echo "native_bridge=$(adb shell getprop ro.dalvik.vm.native.bridge)"
+           echo "arm64_abi=$(adb shell getprop ro.product.cpu.abilist64)"
+           adb install-multiple -r --abi arm64-v8a \
              /tmp/almond-assets/com.almondesim.app.apk \
              /tmp/almond-assets/config.arm64_v8a.apk \
              /tmp/almond-assets/config.en.apk \
@@ -212,7 +214,7 @@ jobs:
           SESSION_MINUTES: ${{ github.event.inputs.session_minutes }}
         with:
           api-level: 35
-          target: google_apis_playstore
+           target: google_apis
           arch: x86_64
           profile: pixel_7_pro
           cores: 2
