@@ -124,6 +124,22 @@ jobs:
             echo "KVM is unavailable; the emulator will use software acceleration."
           fi
 
+      - name: Download Almond APK assets
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/almond-assets
+          base="https://github.com/n4n45h1/android-ai-runner/releases/download/almond-1.3.3"
+          for asset in \
+            com.almondesim.app.apk \
+            config.arm64_v8a.apk \
+            config.en.apk \
+            config.fr.apk \
+            config.xxhdpi.apk; do
+            curl --fail --location --retry 3 "${base}/${asset}" \
+              --output "/tmp/almond-assets/${asset}"
+          done
+          ls -lh /tmp/almond-assets
+
       # android-emulator-runner executes `script` line-by-line with /bin/sh,
       # so the real session logic lives in a file invoked as a single line.
       - name: Write Android session script
@@ -151,8 +167,21 @@ jobs:
           adb devices
           echo "release=$(adb shell getprop ro.build.version.release)"
           echo "model=$(adb shell getprop ro.product.model)"
-          echo "sdk=$(adb shell getprop ro.build.version.sdk)"
-          echo "boot_completed=$(adb shell getprop sys.boot_completed)"
+           echo "sdk=$(adb shell getprop ro.build.version.sdk)"
+           echo "boot_completed=$(adb shell getprop sys.boot_completed)"
+
+           adb install-multiple -r \
+             /tmp/almond-assets/com.almondesim.app.apk \
+             /tmp/almond-assets/config.arm64_v8a.apk \
+             /tmp/almond-assets/config.en.apk \
+             /tmp/almond-assets/config.fr.apk \
+             /tmp/almond-assets/config.xxhdpi.apk
+           adb shell pm path com.almondesim.app
+           adb logcat -c
+           adb shell monkey -p com.almondesim.app 1
+           sleep 20
+           adb shell dumpsys package com.almondesim.app > /tmp/almond-package.txt
+           adb logcat -d > /tmp/almond-logcat.txt
 
           MIN="${SESSION_MINUTES:-300}"
           case "${MIN}" in *[!0-9]*|'') MIN=300;; esac
@@ -193,4 +222,14 @@ jobs:
           disable-animations: true
           force-avd-creation: true
           emulator-boot-timeout: 600
-          script: bash /tmp/android-session.sh
+           script: bash /tmp/android-session.sh
+
+      - name: Collect Almond diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: almond-diagnostics-${{ github.run_id }}
+          path: |
+            /tmp/almond-package.txt
+            /tmp/almond-logcat.txt
+          if-no-files-found: ignore
